@@ -1,0 +1,12 @@
+package org.acme.salary;
+unit SalaryUnit;
+
+// This unit listens to the DataStream "salaries" and publishes results to the
+// DataStream "results" exposed by SalaryUnit.java.
+
+rule "Emit salary response"
+when
+    $fact : /salaries
+then
+    results.append($fact.toResponse());
+end

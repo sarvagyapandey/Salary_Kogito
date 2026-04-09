@@ -44,3 +44,19 @@ link.click();
 console.error("Download error:", err);
 }
 }
+
+export async function uploadWorkbook(endpoint, file) {
+const formData = new FormData();
+formData.append('file', file);
+
+const response = await fetch(`http://localhost:8080${endpoint}`, {
+  method: 'POST',
+  body: formData,
+});
+
+if (!response.ok) {
+  throw new Error(`Upload failed: ${response.status}`);
+}
+
+return response;
+}

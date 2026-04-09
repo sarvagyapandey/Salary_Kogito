@@ -12,7 +12,7 @@ public class SalaryResponse {
     public Double cca;
     public String category;
     public String location;
-    public String pfOption;
+    public Double pfOption;
     public Double professionalTax;
 
     // Rule-driven amounts
@@ -40,10 +40,52 @@ public class SalaryResponse {
     public Double tds;
     public Double takeHomeSalary;
 
-    // Dynamic components added via rules
-    public Map<String, Double> components;
-    public Map<String, String> componentTypes;
-    public List<ComponentDto> componentList;
+    // Dynamic components added via rules (private with getters/setters for proper serialization)
+    private Map<String, Double> components;
+    private Map<String, String> componentTypes;
+    private List<ComponentDto> componentList;
+
+    // Explicit getters to ensure GraphQL schema exposes these commonly requested fields
+    public String getEmployeeId() { return employeeId; }
+    public void setEmployeeId(String employeeId) { this.employeeId = employeeId; }
+    public String getName() { return name; }
+    public Double getCtc() { return ctc; }
+    public Double getCca() { return cca; }
+    public String getCategory() { return category; }
+    public String getLocation() { return location; }
+    public Double getPfOption() { return pfOption; }
+    public Double getProfessionalTax() { return professionalTax; }
+
+    public Double getBasic() { return basic; }
+    public Double getBasicStat() { return basicStat; }
+    public Double getHra() { return hra; }
+    public Double getBonus() { return bonus; }
+    public Double getGratuity() { return gratuity; }
+    public Double getEmployeePF() { return employeePF; }
+    public Double getEmployerPF() { return employerPF; }
+    public Double getEmployeeESI() { return employeeESI; }
+    public Double getEmployerESI() { return employerESI; }
+    public Double getMedicalInsurance() { return medicalInsurance; }
+
+    public Double getTaxSlabBase() { return taxSlabBase; }
+    public Double getTaxMultiplier() { return taxMultiplier; }
+    public Double getTaxAfterRebate() { return taxAfterRebate; }
+    public Double getTaxWithCess() { return taxWithCess; }
+
+    public Double getGrossPayable() { return grossPayable; }
+    public Double getSpecialAllowance() { return specialAllowance; }
+    public Double getAnnualGross() { return annualGross; }
+    public Double getTds() { return tds; }
+    public Double getTakeHomeSalary() { return takeHomeSalary; }
+
+    public Map<String, Double> getComponents() { return components; }
+    public void setComponents(Map<String, Double> components) { this.components = components; }
+    
+    public Map<String, String> getComponentTypes() { return componentTypes; }
+    public void setComponentTypes(Map<String, String> componentTypes) { this.componentTypes = componentTypes; }
+    
+    public List<ComponentDto> getComponentList() { return componentList; }
+    public void setComponentList(List<ComponentDto> componentList) { this.componentList = componentList; }
 
     // GraphQL-friendly dynamic component DTO
     public static final class ComponentDto {

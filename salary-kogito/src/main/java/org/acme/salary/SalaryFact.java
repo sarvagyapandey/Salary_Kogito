@@ -1,25 +1,34 @@
 package org.acme.salary;
 
-import java.math.BigDecimal;
-import java.math.RoundingMode;
-import java.util.EnumMap;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Collectors;
 
+/**
+ * Fact consumed by the spreadsheet decision table.
+ *
+ * The new XLSX only sets the basic salary based on CTC, so the rest of the
+ * fields are computed defenely in code with sensible fallbacks to keep the
+ * pipeline running even when the sheet is minimal.
+ */
 public class SalaryFact {
 
-    // Inputs
+    private enum ComponentType { EARNING, DEDUCTION, EMPLOYER_COST }
+
+    // ------- Input fields --------
     private String employeeId;
     private String name;
     private Double ctc;
     private Double cca;
     private String category;
     private String location;
-    private String pfOption;
+    private Double pfOption;
     private Double professionalTax;
     private Double employeePFOverride;
 
-    // Rule-driven values
+    // ------- Rule-driven outputs (may stay null if sheet does not set them) --------
     private Double basic;
     private Double basicStat;
     private Double hra;
@@ -31,261 +40,472 @@ public class SalaryFact {
     private Double employerESI;
     private Double medicalInsurance;
     private Double taxSlabBase;
-    private Double taxAfterRebate;
     private Double taxMultiplier;
+    private Double taxAfterRebate;
     private Double taxWithCess;
-    private Double tds;
 
-    // Derived values
+    // ------- Derived values --------
     private Double grossPayable;
     private Double specialAllowance;
     private Double annualGross;
+    private Double tds;
     private Double takeHomeSalary;
 
-    // Components
-    private final Map<String, Component> components = new HashMap<>();
-    private final EnumMap<ComponentType, Double> componentTotals = new EnumMap<>(ComponentType.class);
+    // ------- Dynamic component tracking --------
+    private final Map<String, Double> components = new LinkedHashMap<>();
+    private final Map<String, String> componentTypes = new LinkedHashMap<>();
 
     public SalaryFact() {
-        this.basic = 0d;
-        this.basicStat = 0d;
-        this.hra = 0d;
-        this.bonus = 0d;
-        this.gratuity = 0d;
-        this.employeePF = 0d;
-        this.employerPF = 0d;
-        this.employeeESI = 0d;
-        this.employerESI = 0d;
-        this.medicalInsurance = 0d;
-        this.taxSlabBase = 0d;
-        this.taxAfterRebate = 0d;
-        this.taxMultiplier = 1.0d;
-        this.taxWithCess = 0d;
-        this.tds = 0d;
-        for (ComponentType type : ComponentType.values()) {
-            componentTotals.put(type, 0d);
+        // default constructor required by Kogito/Drools
+        this.taxMultiplier = 1.0d; // neutral default used as fallback
+    }
+
+    public SalaryFact(String employeeId, String name, Double ctc) {
+        this();
+        this.employeeId = employeeId;
+        this.name = name;
+        this.ctc = ctc;
+    }
+
+    /**
+     * Build a fact from a generic input map (GraphQL / Excel upload).
+     */
+    public static SalaryFact from(Map<String, Object> input) {
+        SalaryFact f = new SalaryFact();
+        f.employeeId = asString(input.get("employeeId"));
+        f.name = asString(input.get("name"));
+        f.ctc = defaultDouble(input.get("ctc"), null);
+        f.cca = defaultDouble(input.get("cca"), 0d);
+        f.category = asString(input.get("category"));
+        f.location = asString(input.get("location"));
+        f.setPfOption(defaultDouble(input.get("pfOption"), null));
+        f.professionalTax = defaultDouble(input.get("professionalTax"), 0d);
+        f.employeePFOverride = defaultDouble(input.get("employeePFOverride"), null);
+        return f;
+    }
+
+    /**
+     * First pass derived math between rule engine phases.
+     * With the spreadsheet now owning gratuity/medical/etc, this method only
+     * does numeric aggregation and conservative fallbacks.
+     */
+    public void computePreTax() {
+        // If BasicStat wasn't set by spreadsheet, derive it to keep downstream rules (Bonus, etc.) working
+        if (this.basicStat == null || this.basicStat == 0d) {
+            double computed = Math.max(n(basic), n(ctc) * 0.5 + n(cca) * 0.5);
+            this.basicStat = decimal(computed);
+        }
+
+        // If Bonus wasn't set by the sheet (e.g., band mismatch), apply the same rule's intent defensively
+        if (this.bonus == null) {
+            this.bonus = (n(basicStat) <= 21000) ? decimal(n(basicStat) * 0.0833) : 0d;
+        }
+
+        if (this.gratuity == null || this.gratuity == 0d) {
+            this.gratuity = decimal(n(basic) * 0.05); // fallback only; primary comes from sheet
+        }
+
+        calculateGrossAndSpecial();
+    }
+
+    /**
+     * Second pass math after tax rules fire.
+     * Dynamically applies components based on classification:
+     * - EARNING: add to take-home
+     * - DEDUCTION: subtract from take-home
+     * - EMPLOYER_COST: not added to take-home
+     */
+    public void computePostTax() {
+        // Start with gross payable
+        double takeHome = n(grossPayable);
+        
+        // Subtract deduction components dynamically
+        for (Map.Entry<String, Double> entry : components.entrySet()) {
+            if (ComponentType.DEDUCTION.name().equals(componentTypes.get(entry.getKey()))) {
+                takeHome -= n(entry.getValue());
+            }
+        }
+        
+        // Add CCA (special case: always added despite being component-like)
+        takeHome += n(cca);
+        
+        // Fixed deductions that aren't in components (backward compatibility)
+        takeHome -= n(employeePF);
+        takeHome -= n(employeeESI);
+        takeHome -= n(professionalTax);
+        takeHome -= n(tds);
+        takeHome -= n(medicalInsurance);
+        
+        this.takeHomeSalary = decimal(takeHome);
+    }
+
+    /**
+     * Spreadsheet helper: calculate amount from percent/fixed/cap/minDefault columns.
+     * NOTE: percent is expected to be in decimal form (0.05 for 5%, not 5)
+     */
+    public static Double amount(Double base, Double percent, Double fixed, Double cap, Double minDefault) {
+        double effectiveBase = base == null ? 0d : base;
+        if (cap != null && effectiveBase > cap) {
+            effectiveBase = cap;
+        }
+
+        double result;
+        if (fixed != null) {
+            result = fixed;
+        } else if (percent != null) {
+            // percent is in decimal form (0.05 means 5%), so multiply directly without dividing by 100
+            result = effectiveBase * percent;
+        } else {
+            result = 0d;
+        }
+
+        if (minDefault != null && result < minDefault) {
+            result = minDefault;
+        }
+        return decimal(result);
+    }
+
+    /**
+     * Central place for gross/special/annual derivation so it can be reused
+     * both during rule passes and when getters are invoked directly.
+     * 
+     * Dynamically applies components based on classification:
+     * - EARNING: counted as part of gross
+     * - EMPLOYER_COST: subtracted from CTC to get gross
+     */
+    private void calculateGrossAndSpecial() {
+        // Start with CTC (total cost to company)
+        double gross = n(ctc);
+        
+        // Subtract employer-cost components (e.g., employer PF, ESI, gratuity)
+        for (Map.Entry<String, Double> entry : components.entrySet()) {
+            if (ComponentType.EMPLOYER_COST.name().equals(componentTypes.get(entry.getKey()))) {
+                gross -= n(entry.getValue());
+            }
+        }
+        
+        // Subtract fixed employer costs (backward compatibility)
+        gross -= n(employerPF);
+        gross -= n(employerESI);
+        gross -= n(gratuity);
+        
+        this.grossPayable = decimal(gross);
+        
+        // Special Allowance = Gross - (Base components: Basic + HRA + Bonus)
+        // Any additional earning components flow through automatically
+        double baseComponents = n(basic) + n(hra) + n(bonus);
+        
+        // Add other earning components to base
+        for (Map.Entry<String, Double> entry : components.entrySet()) {
+            if (ComponentType.EARNING.name().equals(componentTypes.get(entry.getKey()))) {
+                baseComponents += n(entry.getValue());
+            }
+        }
+        
+        this.specialAllowance = decimal(n(grossPayable) - baseComponents);
+        this.annualGross = decimal(n(grossPayable) * 12);
+    }
+
+    /**
+     * Safeguard to ensure derived numbers are available even if computePreTax()
+     * was skipped by the caller; lightweight since it only runs when needed.
+     */
+    private void ensureGrossAndSpecialComputed() {
+        if (grossPayable == null || specialAllowance == null || annualGross == null) {
+            calculateGrossAndSpecial();
         }
     }
 
-    // Factory
-    public static SalaryFact from(Map<String, Object> input) {
-        SalaryFact fact = new SalaryFact();
-        fact.employeeId = (String) input.get("employeeId");
-        fact.name = (String) input.get("name");
-        fact.ctc = getNumber(input.get("ctc"));
-        fact.cca = getNumber(input.get("cca"));
-        fact.category = (String) input.get("category");
-        fact.location = (String) input.get("location");
-        fact.pfOption = (String) input.get("pfOption");
-        fact.professionalTax = getNumber(input.get("professionalTax"));
-        fact.employeePFOverride = getNumber(input.get("employeePFOverride"));
-        return fact;
+    public void addComponent(String name, Double amount) {
+        addComponent(name, amount, null);
     }
 
-    private static Double getNumber(Object val) {
-        if (val == null) return 0d;
-        if (val instanceof Number) return ((Number) val).doubleValue();
-        return Double.valueOf(val.toString());
+    public void addComponent(String name, Double amount, String explicitType) {
+        if (name == null) return;
+        ComponentType type = resolveType(name, explicitType);
+        String cleanName = normalizeName(name);
+        Double value = decimal(amount == null ? 0d : amount);
+        System.out.println("DEBUG addComponent: name='" + name + "', cleanName='" + cleanName + "', amount=" + amount + ", value=" + value + ", type=" + type.name());
+        components.put(cleanName, value);
+        componentTypes.put(cleanName, type.name());
     }
 
-    // ---------------- Helpers ----------------
+    private ComponentType resolveType(String name, String explicitType) {
+        ComponentType fromExplicit = parseType(explicitType);
+        if (fromExplicit != null) return fromExplicit;
+
+        ComponentType fromName = parseType(name);
+        return fromName != null ? fromName : ComponentType.EARNING;
+    }
+
+    private ComponentType parseType(String label) {
+        if (label == null) return null;
+        String norm = label.replaceAll("[\\[\\]()]", "").trim().toUpperCase();
+        switch (norm) {
+            case "EARNING":
+            case "EARNINGS":
+                return ComponentType.EARNING;
+            case "DEDUCTION":
+            case "DEDUCTIONS":
+                return ComponentType.DEDUCTION;
+            case "EMPLOYER_COST":
+            case "EMPLOYER COST":
+            case "EMPLOYER-COST":
+                return ComponentType.EMPLOYER_COST;
+            default:
+                return null;
+        }
+    }
+
+    private String normalizeName(String name) {
+        String cleaned = name;
+        cleaned = cleaned.replaceAll("\\s*\\((?i:earning|earnings|deduction|deductions|employer[_\\- ]?cost)\\)\\s*$", "");
+        cleaned = cleaned.replaceAll("\\s*\\[(?i:earning|earnings|deduction|deductions|employer[_\\- ]?cost)\\]\\s*$", "");
+        return cleaned.trim();
+    }
+
+    private double total(ComponentType type) {
+        return components.entrySet().stream()
+                .filter(e -> resolveType(e.getKey(), componentTypes.get(e.getKey())) == type)
+                .mapToDouble(e -> n(e.getValue()))
+                .sum();
+    }
+    
+    /**
+     * Calculate how a new component should affect gross payable based on its type.
+     * - EARNING: Add to gross (+1)
+     * - EMPLOYER_COST: Subtract from gross (-1)
+     * - DEDUCTION: No impact on gross (0)
+     */
+    public double getComponentGrossImpact(Double amount, ComponentType type) {
+        if (amount == null || type == null) return 0d;
+        switch (type) {
+            case EARNING:
+                return n(amount);  // Add earnings to gross
+            case EMPLOYER_COST:
+                return -n(amount); // Subtract employer costs from gross
+            case DEDUCTION:
+                return 0d;         // Deductions don't affect gross
+            default:
+                return 0d;
+        }
+    }
+    
+    /**
+     * Calculate how a new component should affect take-home salary based on its type.
+     * - EARNING: Add to take-home (+1)
+     * - DEDUCTION: Subtract from take-home (-1)
+     * - EMPLOYER_COST: No impact on take-home (0)
+     */
+    public double getComponentTakeHomeImpact(Double amount, ComponentType type) {
+        if (amount == null || type == null) return 0d;
+        switch (type) {
+            case EARNING:
+                return n(amount);  // Add earnings to take-home
+            case DEDUCTION:
+                return -n(amount); // Subtract deductions from take-home
+            case EMPLOYER_COST:
+                return 0d;         // Employer costs don't affect take-home
+            default:
+                return 0d;
+        }
+    }
+
+    /**
+     * Convert to API response object.
+     */
+    public SalaryResponse toResponse() {
+        // Align derived values with the business formulas before exposing the response.
+        // Special Allowance = Gross - (Basic + HRA + Bonus)
+        // Take Home      = Gross - Employee PF - Employee ESI - TDS - PT + CCA - Medical Insurance
+        ensureGrossAndSpecialComputed();
+        computePostTax();
+        SalaryResponse res = new SalaryResponse();
+        res.employeeId = employeeId;
+        res.name = name;
+        res.ctc = ctc;
+        res.cca = cca;
+        res.category = category;
+        res.location = location;
+        res.pfOption = pfOption;
+        res.professionalTax = professionalTax;
+
+        res.basic = basic;
+        res.basicStat = basicStat;
+        res.hra = hra;
+        res.bonus = bonus;
+        res.gratuity = gratuity;
+        res.employeePF = employeePF;
+        res.employerPF = employerPF;
+        res.employeeESI = employeeESI;
+        res.employerESI = employerESI;
+        res.medicalInsurance = medicalInsurance;
+
+        res.taxSlabBase = taxSlabBase;
+        res.taxMultiplier = taxMultiplier;
+        res.taxAfterRebate = taxAfterRebate;
+        res.taxWithCess = taxWithCess;
+
+        res.grossPayable = grossPayable;
+        res.specialAllowance = specialAllowance;
+        res.annualGross = annualGross;
+        res.tds = tds;
+        res.takeHomeSalary = takeHomeSalary;
+
+        // Set dynamic components using setters for proper serialization
+        if (!components.isEmpty()) {
+            res.setComponents(new LinkedHashMap<>(components));
+            res.setComponentTypes(new LinkedHashMap<>(componentTypes));
+            List<SalaryResponse.ComponentDto> list = components.entrySet()
+                    .stream()
+                    .map(e -> new SalaryResponse.ComponentDto(e.getKey(), e.getValue(), componentTypes.get(e.getKey())))
+                    .collect(Collectors.toList());
+            res.setComponentList(list);
+        }
+        return res;
+    }
+
     public static Double decimal(Double value) {
-        if (value == null) return 0d;
-        return BigDecimal.valueOf(value).setScale(0, RoundingMode.HALF_UP).doubleValue();
+        if (value == null) return null;
+        // Round to the nearest whole number but keep Double semantics (e.g., 82.6 -> 83.0)
+        return (double) Math.round(value);
     }
 
-    public static Double decimal(Double value, int scale) {
-        if (value == null) return 0d;
-        return BigDecimal.valueOf(value).setScale(scale, RoundingMode.HALF_UP).doubleValue();
+    private static String asString(Object o) {
+        return o == null ? null : Objects.toString(o, null);
     }
 
-    public static boolean inRange(Double value, Double min, Double max) {
-        if (value == null) return false;
-        if (min != null && value < min) return false;
-        if (max != null && value > max) return false;
-        return true;
+    private static Double defaultDouble(Object o, Double fallback) {
+        try {
+            if (o == null) return fallback;
+            if (o instanceof Number) {
+                return ((Number) o).doubleValue();
+            }
+            return Double.valueOf(o.toString());
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
     }
 
-    // ---------------- Basic ----------------
-    public void setBasic(Double basic) { this.basic = basic; }
+    private Double n(Double v) {
+        return v == null ? 0d : decimal(v);
+    }
+
+    // --------------- Getters and Setters ----------------
+    public String getEmployeeId() { return employeeId; }
+    public void setEmployeeId(String employeeId) { this.employeeId = employeeId; }
+
+    public String getName() { return name; }
+    public void setName(String name) { this.name = name; }
+
+    public Double getCtc() { return ctc; }
+    public void setCtc(Double ctc) { this.ctc = ctc; }
+
+    public Double getCca() { return cca; }
+    public void setCca(Double cca) { this.cca = cca; }
+
+    public String getCategory() { return category; }
+    public void setCategory(String category) { this.category = category; }
+
+    public String getLocation() { return location; }
+    public void setLocation(String location) { this.location = location; }
+
+    public Double getPfOption() { return pfOption; }
+
+    // Strict double-only setter 1-5
+    public void setPfOption(Double value) {
+        if (value != null && value >= 1 && value <= 5) {
+            this.pfOption = value;
+        } else {
+            this.pfOption = null;
+        }
+    }
+
+    public Double getPfOptionCode() { return pfOption; }
+    public void setPfOptionCode(Double code) { setPfOption(code); }
+
+    public Double getProfessionalTax() { return professionalTax; }
+    public void setProfessionalTax(Double professionalTax) { this.professionalTax = professionalTax; }
+
+    public Double getEmployeePFOverride() { return employeePFOverride; }
+    public void setEmployeePFOverride(Double employeePFOverride) { this.employeePFOverride = employeePFOverride; }
+
     public Double getBasic() { return basic; }
-
-    public void updateBasicStat() {
-        this.basicStat = decimal(Math.max(basic, (ctc + cca) * 0.5));
+    public void setBasic(Double basic) { this.basic = decimal(basic); }
+    public void setBasic(Number basic) {
+        if (basic != null) this.basic = decimal(basic.doubleValue());
     }
 
     public Double getBasicStat() { return basicStat; }
-
-    // ---------------- HRA ----------------
-    public void setHra(Double hra) { this.hra = hra; }
+    public void setBasicStat(Double basicStat) { this.basicStat = decimal(basicStat); }
+    
     public Double getHra() { return hra; }
+    public void setHra(Double hra) { this.hra = decimal(hra); }
 
-    // ---------------- Bonus ----------------
-    public void setBonus(Double bonus) { this.bonus = bonus; }
     public Double getBonus() { return bonus; }
+    public void setBonus(Double bonus) { this.bonus = decimal(bonus); }
 
-    // ---------------- PF ----------------
-    public void setEmployeePF(Double pf) { this.employeePF = pf; }
-    public Double getEmployeePF() { return employeePF; }
-
-    public void setEmployerPF(Double pf) { this.employerPF = pf; }
-    public Double getEmployerPF() { return employerPF; }
-
-    public Double employeePFOverrideOrDefault(Double defaultValue) {
-        if (employeePFOverride == null) return defaultValue;
-        return Math.max(employeePFOverride, defaultValue);
-    }
-
-    // ---------------- ESI ----------------
-    public void setEmployeeESI(Double esi) { this.employeeESI = esi; }
-    public Double getEmployeeESI() { return employeeESI; }
-
-    public void setEmployerESI(Double esi) { this.employerESI = esi; }
-    public Double getEmployerESI() { return employerESI; }
-
-    // ---------------- Gratuity ----------------
-    public void setGratuity(Double gratuity) { this.gratuity = gratuity; }
     public Double getGratuity() { return gratuity; }
+    public void setGratuity(Double gratuity) { this.gratuity = decimal(gratuity); }
 
-    // ---------------- Tax ----------------
-    public void setTaxSlabBase(Double base) { this.taxSlabBase = base; }
-    public Double getTaxSlabBase() { return taxSlabBase; }
+    public Double getEmployeePF() { return employeePF; }
+    public void setEmployeePF(Double employeePF) { this.employeePF = decimal(employeePF); }
 
-    public void setTaxAfterRebate(Double rebate) { this.taxAfterRebate = rebate; }
-    public Double getTaxAfterRebate() { return taxAfterRebate; }
+    public Double getEmployerPF() { return employerPF; }
+    public void setEmployerPF(Double employerPF) { this.employerPF = decimal(employerPF); }
 
-    public void setTaxMultiplier(Double multiplier) { this.taxMultiplier = multiplier; }
-    public Double getTaxMultiplier() { return taxMultiplier; }
+    public Double getEmployeeESI() { return employeeESI; }
+    public void setEmployeeESI(Double employeeESI) { this.employeeESI = decimal(employeeESI); }
 
-    public void setTaxWithCess(Double tax) { this.taxWithCess = tax; }
-    public Double getTaxWithCess() { return taxWithCess; }
+    public Double getEmployerESI() { return employerESI; }
+    public void setEmployerESI(Double employerESI) { this.employerESI = decimal(employerESI); }
 
-    public void setTds(Double tds) { this.tds = tds; }
-    public Double getTds() { return tds; }
-
-    // ---------------- Derived ----------------
-    public void computePreTax() {
-        // Note: Gratuity is now calculated by spreadsheet rule (5% of basic)
-        // If gratuity is still 0 (not set by rules), calculate it here as fallback
-        if (this.gratuity == null || this.gratuity == 0d) {
-            this.gratuity = decimal(basic * 0.05);
-        }
-        double earnings = total(ComponentType.EARNING);
-        double employerCosts = total(ComponentType.EMPLOYER_COST);
-        this.grossPayable = decimal(ctc - employerPF - employerESI - gratuity - employerCosts + earnings);
-        this.specialAllowance = decimal(grossPayable - basic - hra - bonus - earnings);
-        this.annualGross = decimal(grossPayable * 12);
-    }
-
-    public void computePostTax() {
-        // All tax calculations are now driven by spreadsheet rules:
-        // - TaxAfterRebate rule applies rebate if annualGross <= 1200000
-        // - TaxWithCess rule applies the correct multiplier based on gross range
-        // If they're not set by rules (shouldn't happen), use fallback logic
-        if (taxAfterRebate == null || taxAfterRebate == 0d) {
-            this.taxAfterRebate = decimal(Math.max(taxSlabBase - 5000, 0));
-        }
-        if (taxWithCess == null || taxWithCess == 0d) {
-            Double multiplier = (taxMultiplier == null || taxMultiplier == 0d) ? 1.0d : taxMultiplier;
-            this.taxWithCess = decimal(taxAfterRebate * multiplier);
-        }
-        this.tds = decimal(taxWithCess / 12);
-        double deductions = total(ComponentType.DEDUCTION);
-        this.takeHomeSalary = decimal(grossPayable - employeePF - employeeESI - professionalTax - tds - deductions + cca - medicalInsurance);
-    }
-
-    public SalaryResponse toResponse() {
-    SalaryResponse res = new SalaryResponse();
-    res.employeeId = this.employeeId;
-    res.name = this.name;
-    res.ctc = this.ctc;
-    res.basic = this.basic;
-    res.basicStat = this.basicStat;
-    res.hra = this.hra;
-    res.bonus = this.bonus;
-    res.gratuity = this.gratuity;
-    res.employeePF = this.employeePF;
-    res.employerPF = this.employerPF;
-    res.employeeESI = this.employeeESI;
-    res.employerESI = this.employerESI;
-    res.medicalInsurance = this.medicalInsurance;
-    res.grossPayable = this.grossPayable;
-    res.specialAllowance = this.specialAllowance;
-    res.annualGross = this.annualGross;
-    res.taxSlabBase = this.taxSlabBase;
-    res.taxAfterRebate = this.taxAfterRebate;
-    res.taxMultiplier = this.taxMultiplier;
-    res.taxWithCess = this.taxWithCess;
-    res.tds = this.tds;
-    res.takeHomeSalary = this.takeHomeSalary;
-    res.cca = this.cca;
-    res.category = this.category;
-    res.pfOption = this.pfOption;
-    res.location = this.location;
-
-    // Components mapping
-    Map<String, Double> compValues = new HashMap<>();
-    Map<String, String> compTypes = new HashMap<>();
-    java.util.List<SalaryResponse.ComponentDto> compList = new java.util.ArrayList<>();
-    for (Component c : components.values()) {
-        compValues.put(c.name, c.amount);
-        compTypes.put(c.name, c.type.name());
-        compList.add(new SalaryResponse.ComponentDto(c.name, c.amount, c.type.name()));
-    }
-    res.components = compValues;
-    res.componentTypes = compTypes;
-    res.componentList = compList;
-
-    return res;
-}
-
-    public Double getGrossPayable() { return grossPayable; }
-    public Double getSpecialAllowance() { return specialAllowance; }
-    public Double getAnnualGross() { return annualGross; }
-    public Double getTakeHomeSalary() { return takeHomeSalary; }
-
-    // ---------------- Components ----------------
-    public void addComponent(String name, Double amount, String type) {
-        ComponentType ct = ComponentType.from(type);
-        Component component = new Component(name, amount == null ? 0d : amount, ct);
-        components.put(name, component);
-        componentTotals.put(ct, decimal(componentTotals.get(ct) + amount));
-    }
-
-    public Map<String, Component> getComponents() { return components; }
-
-    private double total(ComponentType type) { return componentTotals.getOrDefault(type, 0d); }
-
-    public enum ComponentType { EARNING, DEDUCTION, EMPLOYER_COST;
-
-        public static ComponentType from(String raw) {
-            if (raw == null) return EARNING;
-            try { return ComponentType.valueOf(raw.trim().toUpperCase()); }
-            catch(Exception e) { return EARNING; }
-        }
-    }
-
-    public static final class Component {
-        public final String name;
-        public final double amount;
-        public final ComponentType type;
-        public Component(String name, double amount, ComponentType type) {
-            this.name = name;
-            this.amount = amount;
-            this.type = type;
-        }
-    }
-
-    // ---------------- Inputs Getters ----------------
-    public String getEmployeeId() { return employeeId; }
-    public String getName() { return name; }
-    public Double getCtc() { return ctc; }
-    public Double getCca() { return cca; }
-    public String getCategory() { return category; }
-    public String getLocation() { return location; }
-    public String getPfOption() { return pfOption; }
-    public Double getProfessionalTax() { return professionalTax; }
-    public Double getEmployeePFOverride() { return employeePFOverride; }
     public Double getMedicalInsurance() { return medicalInsurance; }
-    public void setMedicalInsurance(Double med) { this.medicalInsurance = med; }
+    public void setMedicalInsurance(Double medicalInsurance) { this.medicalInsurance = decimal(medicalInsurance); }
+
+    public Double getTaxSlabBase() { return taxSlabBase; }
+    public void setTaxSlabBase(Double taxSlabBase) { this.taxSlabBase = taxSlabBase; }
+
+    public Double getTaxMultiplier() { return taxMultiplier; }
+    public void setTaxMultiplier(Double taxMultiplier) { this.taxMultiplier = taxMultiplier; }
+
+    public Double getTaxAfterRebate() { return taxAfterRebate; }
+    public void setTaxAfterRebate(Double taxAfterRebate) { this.taxAfterRebate = taxAfterRebate; }
+
+    public Double getTaxWithCess() { return taxWithCess; }
+    public void setTaxWithCess(Double taxWithCess) { this.taxWithCess = taxWithCess; }
+
+    public Double getGrossPayable() { ensureGrossAndSpecialComputed(); return grossPayable; }
+    public void setGrossPayable(Double grossPayable) { this.grossPayable = decimal(grossPayable); }
+
+    public Double getSpecialAllowance() { ensureGrossAndSpecialComputed(); return specialAllowance; }
+    public void setSpecialAllowance(Double specialAllowance) { this.specialAllowance = decimal(specialAllowance); }
+
+    public Double getAnnualGross() { ensureGrossAndSpecialComputed(); return annualGross; }
+    public void setAnnualGross(Double annualGross) { this.annualGross = decimal(annualGross); }
+
+    public Double getTds() { return tds; }
+    public void setTds(Double tds) { this.tds = decimal(tds); }
+
+    public Double getTakeHomeSalary() { return takeHomeSalary; }
+    public void setTakeHomeSalary(Double takeHomeSalary) { this.takeHomeSalary = decimal(takeHomeSalary); }
+
+    public Map<String, Double> getComponents() { return components; }
+    public Map<String, String> getComponentTypes() { return componentTypes; }
+    
+    /**
+     * Get the ComponentType for a given component name.
+     * Returns EARNING as default if not found.
+     */
+    public ComponentType getComponentType(String componentName) {
+        if (componentName == null) return ComponentType.EARNING;
+        String type = componentTypes.get(componentName);
+        if (type == null) return ComponentType.EARNING;
+        return ComponentType.valueOf(type);
+    }
+
+    // Factory method for convenience
+    public static SalaryFact from(String employeeId, String name, Double ctc) {
+        return new SalaryFact(employeeId, name, ctc);
+    }
 }

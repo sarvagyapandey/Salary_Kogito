@@ -1,14 +1,23 @@
 package org.acme.salary;
 
-import org.apache.poi.ss.usermodel.*;
-import org.apache.poi.xssf.usermodel.XSSFWorkbook;
-
-import javax.enterprise.context.ApplicationScoped;
-import javax.inject.Inject;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+import javax.enterprise.context.ApplicationScoped;
+import javax.inject.Inject;
+
+import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 
 /**
  * Handles Excel uploads for salary calculations and produces a result workbook.
@@ -48,10 +57,14 @@ public class BatchSalaryExcelService {
             for (Map<String, Object> input : inputs) {
                 SalaryResponse resp = salaryService.calculate(input);
                 responses.add(resp);
-                if (resp.components != null) {
-                    dynamicNames.addAll(resp.components.keySet());
+                if (resp.getComponents() != null && !resp.getComponents().isEmpty()) {
+                    System.out.println("DEBUG: Employee " + input.get("employeeId") + " has components: " + resp.getComponents().keySet());
+                    dynamicNames.addAll(resp.getComponents().keySet());
+                } else {
+                    System.out.println("DEBUG: Employee " + input.get("employeeId") + " has NO components");
                 }
             }
+            System.out.println("DEBUG: Total dynamic component names collected: " + dynamicNames);
 
             Workbook resultWb = new XSSFWorkbook();
             Sheet resultSheet = resultWb.createSheet("SalaryOutput");
@@ -150,7 +163,9 @@ public class BatchSalaryExcelService {
         for (String col : OUTPUT_COLUMNS) {
             header.createCell(c++).setCellValue(col);
         }
+        System.out.println("DEBUG: writeHeader - dynamicNames size = " + dynamicNames.size() + ", names = " + dynamicNames);
         for (String name : dynamicNames) {
+            System.out.println("DEBUG: Adding header column for component: " + name);
             header.createCell(c++).setCellValue(name);
         }
     }
@@ -173,10 +188,15 @@ public class BatchSalaryExcelService {
         for (String col : OUTPUT_COLUMNS) {
             writeCell(row, c++, outMap.get(col));
         }
-        if (resp.components != null) {
+        if (resp.getComponents() != null && !resp.getComponents().isEmpty()) {
+            System.out.println("DEBUG: Writing " + dynamicNames.size() + " dynamic components for row " + rowNum);
             for (String name : dynamicNames) {
-                writeCell(row, c++, resp.components.get(name));
+                Double value = resp.getComponents().get(name);
+                System.out.println("  DEBUG: Component '" + name + "' = " + value);
+                writeCell(row, c++, value);
             }
+        } else {
+            System.out.println("DEBUG: Row " + rowNum + " has no components to write");
         }
     }
 
@@ -216,6 +236,7 @@ public class BatchSalaryExcelService {
         Cell cell = row.createCell(col);
         if (value == null) return;
         if (value instanceof Number) {
+            // POI expects a double for numeric cells; use doubleValue to handle all Number types.
             cell.setCellValue(((Number) value).doubleValue());
         } else if (value instanceof Boolean) {
             cell.setCellValue((Boolean) value);

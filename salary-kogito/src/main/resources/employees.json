@@ -1,24 +1,23 @@
 [
   {
-  "employeeId": "emp_16",
-  "name": "Rahul",
-  "ctc": 42000,
-  "cca": 1800,
+  "employeeId": "emp_18",
+  "name": "Rah",
+  "ctc": 2000000.0,
+  "cca": 1800.0,
   "category": "DevOps",
   "location": "Delhi",
-  "pfOption": "P2",
+  "pfOption": 5.00,
   "professionalTax": 200,
-  "employeePFOverride": null
-},
+  "employeePFOverride": 5000.00},
 
   {
-  "employeeId": "emp_16",
-  "name": "Rahul",
-  "ctc": 42000,
-  "cca": 1800,
+  "employeeId": "emp_17",
+  "name": "Batman",
+  "ctc": 42000.0,
+  "cca": 0.0,
   "category": "DevOps",
   "location": "Delhi",
-  "pfOption": "P2",
+  "pfOption": 2.00,
   "professionalTax": 200,
   "employeePFOverride": null
   }
