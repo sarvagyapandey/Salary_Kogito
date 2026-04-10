@@ -74,11 +74,14 @@ public class SalaryFact {
         SalaryFact f = new SalaryFact();
         f.employeeId = asString(input.get("employeeId"));
         f.name = asString(input.get("name"));
-        f.ctc = defaultDouble(input.get("ctc"), null);
-        f.cca = defaultDouble(input.get("cca"), 0d);
+        // Allow either "ctc" or "ctcMonthly" so templates can label it clearly as monthly CTC.
+        Object ctcValue = input.containsKey("ctc") ? input.get("ctc") : input.get("ctcMonthly");
+        f.setCtc(defaultDouble(ctcValue, null));
+        f.setCca(defaultDouble(input.get("cca"), 0d));
         f.category = asString(input.get("category"));
         f.location = asString(input.get("location"));
-        f.setPfOption(defaultDouble(input.get("pfOption"), null));
+        f.setPfOption(parsePfOption(input.get("pfOption")));
+
         f.professionalTax = defaultDouble(input.get("professionalTax"), 0d);
         f.employeePFOverride = defaultDouble(input.get("employeePFOverride"), null);
         return f;
@@ -91,19 +94,6 @@ public class SalaryFact {
      */
     public void computePreTax() {
         // If BasicStat wasn't set by spreadsheet, derive it to keep downstream rules (Bonus, etc.) working
-        if (this.basicStat == null || this.basicStat == 0d) {
-            double computed = Math.max(n(basic), n(ctc) * 0.5 + n(cca) * 0.5);
-            this.basicStat = decimal(computed);
-        }
-
-        // If Bonus wasn't set by the sheet (e.g., band mismatch), apply the same rule's intent defensively
-        if (this.bonus == null) {
-            this.bonus = (n(basicStat) <= 21000) ? decimal(n(basicStat) * 0.0833) : 0d;
-        }
-
-        if (this.gratuity == null || this.gratuity == 0d) {
-            this.gratuity = decimal(n(basic) * 0.05); // fallback only; primary comes from sheet
-        }
 
         calculateGrossAndSpecial();
     }
@@ -203,7 +193,8 @@ public class SalaryFact {
         }
         
         this.specialAllowance = decimal(n(grossPayable) - baseComponents);
-        this.annualGross = decimal(n(grossPayable) * 12);
+        // Keep all amounts in monthly terms; annualGross mirrors monthly gross for a monthly-only workflow.
+        this.annualGross = decimal(n(grossPayable));
     }
 
     /**
@@ -387,6 +378,27 @@ public class SalaryFact {
         }
     }
 
+    /**
+     * PF option in uploaded sheets often comes as text like "P2".
+     * Normalize to numeric 1–5 so rule rows `pfOption == $1` will match.
+     */
+    public static Double parsePfOption(Object raw) {
+        if (raw == null) return null;
+        if (raw instanceof Number) {
+            return ((Number) raw).doubleValue();
+        }
+        String s = raw.toString().trim().toUpperCase();
+        // Strip a leading 'P' if present (P1..P5)
+        if (s.startsWith("P") && s.length() == 2 && Character.isDigit(s.charAt(1))) {
+            s = s.substring(1);
+        }
+        try {
+            return Double.valueOf(s);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
     private Double n(Double v) {
         return v == null ? 0d : decimal(v);
     }
@@ -402,7 +414,7 @@ public class SalaryFact {
     public void setCtc(Double ctc) { this.ctc = ctc; }
 
     public Double getCca() { return cca; }
-    public void setCca(Double cca) { this.cca = cca; }
+    public void setCca(Double cca) { this.cca = cca == null ? 0d : cca.doubleValue(); }
 
     public String getCategory() { return category; }
     public void setCategory(String category) { this.category = category; }
@@ -414,7 +426,7 @@ public class SalaryFact {
 
     // Strict double-only setter 1-5
     public void setPfOption(Double value) {
-        if (value != null && value >= 1 && value <= 5) {
+        if (value != null) {
             this.pfOption = value;
         } else {
             this.pfOption = null;
@@ -425,7 +437,7 @@ public class SalaryFact {
     public void setPfOptionCode(Double code) { setPfOption(code); }
 
     public Double getProfessionalTax() { return professionalTax; }
-    public void setProfessionalTax(Double professionalTax) { this.professionalTax = professionalTax; }
+    public void setProfessionalTax(Double professionalTax) { this.professionalTax = professionalTax == null ? 0d : professionalTax.doubleValue(); }
 
     public Double getEmployeePFOverride() { return employeePFOverride; }
     public void setEmployeePFOverride(Double employeePFOverride) { this.employeePFOverride = employeePFOverride; }

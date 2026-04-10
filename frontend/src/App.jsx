@@ -14,6 +14,9 @@ export default function App() {
   const [employeeName, setEmployeeName] = useState('');
   const [ctc, setCtc] = useState('600000');
   const [cca, setCca] = useState('10000');
+  const [pfOption, setPfOption] = useState('');
+  const [professionalTax, setProfessionalTax] = useState('200');
+  const [employeePFOverride, setEmployeePFOverride] = useState('');
   const [calcResult, setCalcResult] = useState(null);
   const [status, setStatus] = useState("loading");
   const [message, setMessage] = useState("Checking the current setup...");
@@ -49,6 +52,7 @@ export default function App() {
             employeeId name ctc cca location category professionalTax pfOption basic hra specialAllowance bonus grossPayable
             employeePF employerPF employeeESI employerESI
             gratuity medicalInsurance tds takeHomeSalary
+            errors
           }
         }`, { 
           id: employeeId,
@@ -57,18 +61,18 @@ export default function App() {
           cca: parseFloat(cca) || 0,
           category: null,
           location: null,
-          pfOption: null,
-          professionalTax: 0,
-          employeePFOverride: null
+          pfOption: pfOption === '' ? null : parseFloat(pfOption),
+          professionalTax: professionalTax === '' ? 0 : parseFloat(professionalTax),
+          employeePFOverride: employeePFOverride === '' ? null : parseFloat(employeePFOverride)
         });
       
       // Calculate both versions of takeHomeSalary and grossPayable
       const result = data.calculateSalary;
-      const takeHomeSalaryWithCCA = result.takeHomeSalary + (result.cca || 0);
+      const takeHomeSalaryWithCCA = (result.takeHomeSalary || 0) + (result.cca || 0);
       const takeHomeSalaryWithoutCCA = result.takeHomeSalary;
-      const grossPayableWithCCA = result.grossPayable + (result.cca || 0);
+      const grossPayableWithCCA = (result.grossPayable || 0) + (result.cca || 0);
       const grossPayableWithoutCCA = result.grossPayable;
-      
+
       setCalcResult({
         ...result,
         takeHomeSalaryWithCCA,
@@ -76,8 +80,13 @@ export default function App() {
         grossPayableWithCCA,
         grossPayableWithoutCCA
       });
-      setStatus('healthy');
-      setMessage('Calculation completed successfully');
+      if (result.errors && result.errors.length) {
+        setStatus('error');
+        setMessage(result.errors.join('; '));
+      } else {
+        setStatus('healthy');
+        setMessage('Calculation completed successfully');
+      }
     } catch (e) { 
       setStatus('error');
       setMessage(e.message); 
@@ -389,6 +398,36 @@ export default function App() {
                 style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px dashed rgba(38, 70, 83, 0.22)', background: 'var(--paper-strong)', fontSize: 'inherit' }}
               />
             </div>
+            <div>
+              <label style={{ color: 'var(--muted)', fontSize: '0.85rem', display: 'block', marginBottom: '6px' }}>PF Option (1-5)</label>
+              <input 
+                type="number" 
+                placeholder="e.g., 4"
+                value={pfOption}
+                onChange={(e) => setPfOption(e.target.value)}
+                style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px dashed rgba(38, 70, 83, 0.22)', background: 'var(--paper-strong)', fontSize: 'inherit' }}
+              />
+            </div>
+            <div>
+              <label style={{ color: 'var(--muted)', fontSize: '0.85rem', display: 'block', marginBottom: '6px' }}>Professional Tax</label>
+              <input 
+                type="number" 
+                placeholder="e.g., 200"
+                value={professionalTax}
+                onChange={(e) => setProfessionalTax(e.target.value)}
+                style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px dashed rgba(38, 70, 83, 0.22)', background: 'var(--paper-strong)', fontSize: 'inherit' }}
+              />
+            </div>
+            <div>
+              <label style={{ color: 'var(--muted)', fontSize: '0.85rem', display: 'block', marginBottom: '6px' }}>Employee PF Override</label>
+              <input 
+                type="number" 
+                placeholder="optional(for Pf Option 5)"
+                value={employeePFOverride}
+                onChange={(e) => setEmployeePFOverride(e.target.value)}
+                style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px dashed rgba(38, 70, 83, 0.22)', background: 'var(--paper-strong)', fontSize: 'inherit' }}
+              />
+            </div>
           </div>
 
           <div style={{ display: 'flex', gap: '12px', marginTop: '12px' }}>
@@ -399,6 +438,14 @@ export default function App() {
 
           {calcResult && (
             <div style={{ marginTop: '18px', padding: '18px', borderRadius: '18px', background: '#fff', border: '1px solid rgba(38, 70, 83, 0.08)' }}>
+              {calcResult.errors && calcResult.errors.length > 0 && (
+                <div style={{ marginBottom: '12px', padding: '12px', borderRadius: '12px', background: '#fff4f0', border: '1px solid #f5c2a7', color: '#b54708' }}>
+                  <strong>Validation issues:</strong>
+                  <ul style={{ margin: '8px 0 0 18px', padding: 0 }}>
+                    {calcResult.errors.map((err, idx) => <li key={idx}>{err}</li>)}
+                  </ul>
+                </div>
+              )}
               <h3 style={{ marginTop: 0, marginBottom: '16px', color: 'var(--ink)', fontSize: '1rem', fontWeight: 600 }}>Salary Breakdown</h3>
               {/* Key Summary Cards */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '20px' }}>

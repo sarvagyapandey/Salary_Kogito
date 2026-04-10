@@ -40,6 +40,9 @@ public class SalaryResponse {
     public Double tds;
     public Double takeHomeSalary;
 
+    // Validation / user-facing errors (non-fatal)
+    private java.util.List<String> errors;
+
     // Dynamic components added via rules (private with getters/setters for proper serialization)
     private Map<String, Double> components;
     private Map<String, String> componentTypes;
@@ -77,6 +80,9 @@ public class SalaryResponse {
     public Double getAnnualGross() { return annualGross; }
     public Double getTds() { return tds; }
     public Double getTakeHomeSalary() { return takeHomeSalary; }
+
+    public java.util.List<String> getErrors() { return errors; }
+    public void setErrors(java.util.List<String> errors) { this.errors = errors; }
 
     public Map<String, Double> getComponents() { return components; }
     public void setComponents(Map<String, Double> components) { this.components = components; }

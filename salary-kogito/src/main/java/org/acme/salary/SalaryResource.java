@@ -14,12 +14,22 @@ public class SalaryResource {
     @Inject
     SalaryService salaryService;
 
+    @Inject
+    EmployeeRepository employeeRepository;
+
     /**
-     * GraphQL Query:
-     * calculateSalary(employeeId: "emp_16", ctc: 600000, cca: 10000, ...)
-     * 
-     * Accepts all employee data directly - no database lookup needed.
-     * Employees are provided from uploaded spreadsheet.
+     * GraphQL Query example (single employee, no DB lookup):
+     * calculateSalary(
+     *   employeeId: "emp_16",
+     *   name: "Bruce",
+     *   ctc: 600000,
+     *   cca: 10000,
+     *   category: "Staff",
+     *   location: "Delhi",
+     *   pfOption: 3,
+     *   professionalTax: 200,
+     *   employeePFOverride: 1800
+     * )
      */
     @Query
     public SalaryResponse calculateSalary(
@@ -37,23 +47,43 @@ public class SalaryResource {
             throw new RuntimeException("employeeId must be provided");
         }
 
-        if (ctc == null || ctc <= 0) {
-            throw new RuntimeException("ctc must be provided and positive");
+        // Two modes: (a) full payload provided, (b) only employeeId provided → lookup JSON fixture
+        Map<String, Object> employee = new HashMap<>();
+        Map<String, Object> stored = employeeRepository.findById(employeeId);
+
+        // If caller omitted CTC, pull everything from repository record
+        if ((ctc == null || ctc <= 0) && stored != null) {
+            employee.putAll(stored);
+        } else {
+            if (ctc == null || ctc <= 0) {
+                throw new RuntimeException("ctc must be provided and positive");
+            }
+            employee.put("employeeId", employeeId);
+            employee.put("name", name);
+            employee.put("ctc", ctc);
+            employee.put("cca", cca == null ? 0 : cca);
+            employee.put("category", category);
+            employee.put("location", location);
+            employee.put("pfOption", pfOption);
+            employee.put("professionalTax", professionalTax == null ? 0 : professionalTax);
+            employee.put("employeePFOverride", employeePFOverride);
         }
 
-        // Build employee map from parameters
-        Map<String, Object> employee = new HashMap<>();
-        employee.put("employeeId", employeeId);
-        employee.put("name", name);
-        employee.put("ctc", ctc);
-        employee.put("cca", cca == null ? 0 : cca);
-        employee.put("category", category);
-        employee.put("location", location);
-        employee.put("pfOption", pfOption);
-        employee.put("professionalTax", professionalTax == null ? 0 : professionalTax);
-        employee.put("employeePFOverride", employeePFOverride);
+        // If any optional fields are missing from manual payload, backfill from repository when available
+        if (stored != null) {
+            employee.putIfAbsent("name", stored.get("name"));
+            employee.putIfAbsent("cca", stored.getOrDefault("cca", 0d));
+            employee.putIfAbsent("category", stored.get("category"));
+            employee.putIfAbsent("location", stored.get("location"));
+            employee.putIfAbsent("pfOption", stored.get("pfOption"));
+            employee.putIfAbsent("professionalTax", stored.getOrDefault("professionalTax", 0d));
+            employee.putIfAbsent("employeePFOverride", stored.get("employeePFOverride"));
+        }
 
-        // Call DMN service with provided employee data
+        // Ensure defaults for nullable numbers
+        employee.putIfAbsent("professionalTax", 0d);
+        employee.putIfAbsent("cca", 0d);
+
         return salaryService.calculate(employee);
     }
 }

@@ -34,7 +34,8 @@ public class BatchSalaryExcelService {
             "basic", "hra", "specialAllowance", "bonus",
             "grossPayable", "employeePF", "employerPF",
             "employeeESI", "employerESI", "gratuity",
-            "medicalInsurance", "tds", "takeHomeSalary"
+            "medicalInsurance", "tds", "takeHomeSalary",
+            "errors"
     );
 
     @Inject
@@ -125,6 +126,12 @@ public class BatchSalaryExcelService {
                 map.put(name.trim(), cell.getColumnIndex());
             }
         }
+
+        // Accept either "ctc" or the clearer label "ctcMonthly".
+        if (!map.containsKey("ctc") && map.containsKey("ctcMonthly")) {
+            map.put("ctc", map.get("ctcMonthly"));
+        }
+
         for (String required : INPUT_COLUMNS) {
             if (!map.containsKey(required)) {
                 throw new IllegalArgumentException("Missing required column: " + required);
@@ -139,6 +146,7 @@ public class BatchSalaryExcelService {
             Row row = sheet.getRow(i);
             if (row == null) continue;
             Map<String, Object> input = new HashMap<>();
+            input.put("_rowNumber", i + 1); // 1-based row number for validation messages
             boolean hasData = false;
             for (String col : INPUT_COLUMNS) {
                 Object value = readCell(row.getCell(colIndex.get(col)));
@@ -174,7 +182,9 @@ public class BatchSalaryExcelService {
         Row header = sheet.createRow(0);
         int c = 0;
         for (String col : INPUT_COLUMNS) {
-            header.createCell(c++).setCellValue(col);
+            // Use ctcMonthly for clarity while still accepting "ctc" in uploads.
+            String label = "ctc".equals(col) ? "ctcMonthly" : col;
+            header.createCell(c++).setCellValue(label);
         }
     }
 
@@ -215,6 +225,9 @@ public class BatchSalaryExcelService {
         map.put("medicalInsurance", resp.medicalInsurance);
         map.put("tds", resp.tds);
         map.put("takeHomeSalary", resp.takeHomeSalary);
+        if (resp.getErrors() != null && !resp.getErrors().isEmpty()) {
+            map.put("errors", String.join("; ", resp.getErrors()));
+        }
         return map;
     }
 
