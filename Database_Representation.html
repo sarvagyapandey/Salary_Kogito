@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Database Representation</title>
+  <style>
+    :root {
+      --bg: #f6f8fb;
+      --panel: #ffffff;
+      --ink: #0f172a;
+      --muted: #5b6475;
+      --accent-a: #0ea5e9;
+      --accent-b: #f97316;
+      --border: #d9e1ec;
+      --glow: 0 18px 60px rgba(15, 23, 42, 0.08);
+      --radius: 14px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+      color: var(--ink);
+      background:
+        linear-gradient(120deg, rgba(14,165,233,0.05), rgba(249,115,22,0.05)),
+        repeating-linear-gradient(90deg, transparent 0, transparent 98px, rgba(14,165,233,0.06) 99px, rgba(14,165,233,0.06) 100px),
+        var(--bg);
+      min-height: 100vh;
+      padding: 32px 24px 64px;
+    }
+
+    h1 {
+      text-align: center;
+      margin: 8px 0 28px;
+      letter-spacing: 0.5px;
+      font-weight: 800;
+    }
+
+    .page {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    /* Root node */
+    .root {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      position: relative;
+      margin-bottom: 32px;
+    }
+
+    .badge {
+      padding: 14px 26px;
+      background: linear-gradient(120deg, #0ea5e9, #22d3ee);
+      color: #fff;
+      border-radius: 999px;
+      font-weight: 800;
+      letter-spacing: 0.6px;
+      box-shadow: var(--glow);
+    }
+
+    .root::after {
+      content: "";
+      position: absolute;
+      bottom: -26px;
+      width: 2px;
+      height: 24px;
+      background: linear-gradient(#0ea5e9, #f97316);
+    }
+
+    /* Split arms */
+    .split {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 26px;
+      align-items: start;
+      margin-top: 18px;
+      position: relative;
+    }
+
+    .split::before {
+      content: "";
+      position: absolute;
+      top: -26px;
+      left: 50%;
+      width: 72%;
+      max-width: 760px;
+      transform: translateX(-50%);
+      height: 2px;
+      background: linear-gradient(90deg, transparent, #0ea5e9 10%, #0ea5e9 40%, #f97316 60%, #f97316 90%, transparent);
+    }
+
+    .cluster {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--glow);
+      padding: 18px 18px 10px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .cluster::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 6px;
+      background: linear-gradient(90deg, #0ea5e9, #22c55e, #f97316);
+    }
+
+    .cluster-title {
+      font-weight: 800;
+      font-size: 18px;
+      padding: 8px 12px 6px;
+      color: var(--ink);
+      letter-spacing: 0.3px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 12px;
+    }
+
+    .card {
+      background: #fbfdff;
+      border: 1px solid #e6edf6;
+      border-radius: 10px;
+      padding: 12px 12px 8px;
+      box-shadow: 0 10px 30px rgba(15, 23, 42, 0.04);
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .card:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 16px 32px rgba(15, 23, 42, 0.12);
+    }
+
+    .card h3 {
+      margin: 0 0 6px;
+      font-size: 15px;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      font-size: 12px;
+      border-radius: 999px;
+      background: rgba(14, 165, 233, 0.14);
+      color: #075985;
+      font-weight: 700;
+      letter-spacing: 0.2px;
+    }
+
+    ul {
+      padding-left: 18px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    li + li { margin-top: 4px; }
+
+    /* Responsive tweaks */
+    @media (max-width: 720px) {
+      body { padding: 24px 16px 48px; }
+      .grid { grid-template-columns: 1fr; }
+      .cluster { padding: 14px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <h1>Database Representation</h1>
+
+    <div class="root">
+      <div class="badge">DATABASE</div>
+    </div>
+
+    <div class="split">
+      <!-- EMPLOYEE MASTER -->
+      <section class="cluster">
+        <div class="cluster-title">
+          <span class="pill">Master</span> EMPLOYEE MASTER DATABASE
+        </div>
+        <div class="grid">
+          <article class="card">
+            <h3>Employee Basic Details</h3>
+            <ul>
+              <li><b>Employee ID:</b> String -- Unique ID for each employee; no duplicates.</li>
+              <li><b>Name:</b> String -- Full name for slips, reports, and UI.</li>
+              <li><b>Date of Joining:</b> Date -- Drives experience and benefits.</li>
+              <li><b>Date of Resignation:</b> Date/null -- Null means still working.</li>
+              <li><b>Gender:</b> Male/Female/Other -- Records and compliance.</li>
+              <li><b>Employment Type:</b> FULL_TIME/CONTRACT/INTERN -- Impacts PF, gratuity, benefits.</li>
+              <li><b>Status:</b> ACTIVE/INACTIVE -- Whether currently working.</li>
+              <li><b>Payroll Status:</b> ACTIVE/HOLD/EXITED -- Controls payroll processing.</li>
+            </ul>
+          </article>
+
+          <article class="card">
+            <h3>Academic Details</h3>
+            <ul>
+              <li><b>Highest Academic Qualification:</b> String -- Highest degree obtained.</li>
+              <li><b>Branch:</b> String -- Field of study (e.g., Computer Science, Commerce).</li>
+              <li><b>Year of Qualification:</b> Integer -- Year completed.</li>
+              <li><b>Status of Qualification:</b> COMPLETED/PENDING -- Completion state.</li>
+              <li><b>Professional Start Year:</b> Integer -- Year professional work began.</li>
+              <li><b>Years of Experience:</b> Integer -- Total experience from start year.</li>
+            </ul>
+          </article>
+
+          <article class="card">
+            <h3>Certifications</h3>
+            <ul>
+              <li><b>Certification Name:</b> String -- Name of certification.</li>
+              <li><b>Certification Date:</b> Date -- Achievement date.</li>
+              <li><b>Certification Serial No:</b> String -- Unique certificate number.</li>
+            </ul>
+          </article>
+
+          <article class="card">
+            <h3>Skills</h3>
+            <ul>
+              <li><b>Skill Name:</b> String -- Technology, tool, or domain skill.</li>
+              <li><b>Proficiency Level:</b> BEGINNER/INTERMEDIATE/ADVANCED -- Self or manager rating.</li>
+              <li><b>Years of Experience:</b> Integer -- Time spent using the skill.</li>
+              <li><b>Last Used:</b> Date -- Most recent professional use.</li>
+              <li><b>Primary/Secondary:</b> Boolean -- Whether core to the role.</li>
+              <li><b>Certification Ref:</b> String/URL -- Optional proof or badge link.</li>
+            </ul>
+          </article>
+
+          <article class="card">
+            <h3>Personal Details</h3>
+            <ul>
+              <li><b>Correspondence Address:</b> String -- Current communication address.</li>
+              <li><b>Permanent Address:</b> String -- Home address.</li>
+              <li><b>Personal Email ID:</b> String -- Personal contact.</li>
+              <li><b>Official Email ID:</b> String -- Company-provided email.</li>
+              <li><b>Phone Number:</b> String -- Contact number.</li>
+              <li><b>Marital Status:</b> Single/Married -- For HR records.</li>
+              <li><b>Passport No.:</b> String -- Optional identifier.</li>
+              <li><b>Aadhaar No.:</b> String -- Government ID.</li>
+              <li><b>PAN No.:</b> String -- Required for income tax.</li>
+              <li><b>Father's Name:</b> String -- Record keeping.</li>
+              <li><b>Mother's Name:</b> String -- Record keeping.</li>
+            </ul>
+          </article>
+
+          <article class="card">
+            <h3>Statutory & Bank</h3>
+            <ul>
+              <li><b>PF No.:</b> String -- Provident Fund account number.</li>
+              <li><b>UAN No.:</b> String -- Universal Account Number.</li>
+              <li><b>ESIC Card No:</b> String -- Employee State Insurance ID.</li>
+              <li><b>Bank Name:</b> String -- Salary credit bank.</li>
+              <li><b>Account No:</b> String -- Bank account number.</li>
+              <li><b>IFSC Code:</b> String -- Transfer identifier.</li>
+              <li><b>CTC:</b> Integer -- Annual salary offered.</li>
+              <li><b>PF Option:</b> 1–5 -- PF scheme selection.</li>
+              <li><b>Professional Tax:</b> Integer -- State-based monthly tax.</li>
+            </ul>
+          </article>
+
+          <article class="card">
+            <h3>Loan / Advance Details</h3>
+            <ul>
+              <li><b>Loan Name:</b> String -- Type of loan (e.g., Personal Loan).</li>
+              <li><b>Loan Amount:</b> Integer -- Total loan value.</li>
+              <li><b>No. of EMI:</b> Integer -- Installment count.</li>
+              <li><b>Advance Salary:</b> Integer -- Advance to be adjusted.</li>
+            </ul>
+          </article>
+
+          <article class="card">
+            <h3>Job Details</h3>
+            <ul>
+              <li><b>Team Name:</b> String -- Team the employee belongs to.</li>
+              <li><b>Designation:</b> String -- Job role/title.</li>
+              <li><b>Base Location:</b> String -- Work location affecting rules.</li>
+              <li><b>Department:</b> String -- Functional department (IT, HR, etc.).</li>
+              <li><b>Grade Level:</b> G1/G2/G3 -- Seniority level.</li>
+              <li><b>Cost Center:</b> String -- Budget unit paying salary.</li>
+              <li><b>Business Unit:</b> String -- Company division.</li>
+            </ul>
+          </article>
+
+          <article class="card">
+            <h3>Project Details</h3>
+            <ul>
+              <li><b>Employee Id:</b> String -- Unique identifier for the employee.</li>
+              <li><b>Employee Name:</b> String -- Full name of the employee.</li>
+              <li><b>Project ID:</b> String -- Unique identifier for the project.</li>
+              <li><b>Project Name:</b> String -- Client or internal project name.</li>
+              <li><b>Duration:</b> Date range -- Start and End date(null if ongoing).</li>
+              <li><b>Role/Title:</b> String -- Position on the project.</li>
+              <li><b>Allocation %:</b> Integer -- Efforts put in the project in terms of percentage.</li>
+              <li><b>Tech/Domain:</b> String -- Technologies or business domain.</li>
+              <li><b>Notes:</b> String -- Deliverables or scope summary.</li>
+            </ul>
+          </article>
+
+          <article class="card">
+            <h3>Attendance</h3>
+            <ul>
+              <li><b>Salary To be Calculated:</b> Y/N -- Whether salary should be processed.</li>
+              <li><b>Project ID:</b> String -- Service order/project reference.</li>
+              <li><b>Official Days:</b> Integer -- Total working days in month.</li>
+              <li><b>Worked Days:</b> Integer -- Days actually worked.</li>
+              <li><b>Employee Present Days:</b> Integer -- Days present.</li>
+              <li><b>LOP Days:</b> Integer -- Loss of Pay days.</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <!-- PAYROLL -->
+      <section class="cluster">
+        <div class="cluster-title">
+          <span class="pill" style="background: rgba(249, 115, 22, 0.14); color: #9a3412;">Payroll</span>
+          PAYROLL (MONTHLY SALARY)
+        </div>
+        <div class="grid">
+          <article class="card">
+            <h3>Identification</h3>
+            <ul>
+              <li><b>Employee ID:</b> String -- Links payroll to employee master.</li>
+              <li><b>Payroll Month:</b> String -- Month of salary calculation.</li>
+              <li><b>Run ID:</b> String -- Batch processing identifier.</li>
+            </ul>
+          </article>
+
+          <article class="card">
+            <h3>Input Snapshot</h3>
+            <ul>
+              <li><b>CTC:</b> Integer -- Copied to preserve history.</li>
+              <li><b>CCA:</b> Integer -- Extra allowance used.</li>
+              <li><b>Category:</b> String -- Category for rules.</li>
+              <li><b>Location:</b> String -- Location for rule evaluation.</li>
+              <li><b>PF Option:</b> 1–5 -- PF scheme used.</li>
+              <li><b>Professional Tax:</b> Integer -- State deduction.</li>
+              <li><b>Employee PF Override:</b> Integer/null -- Override instead of calculated PF.</li>
+            </ul>
+          </article>
+
+          <article class="card">
+            <h3>Attendance</h3>
+            <ul>
+              <li><b>Salary To be Calculated:</b> true/false -- Whether processed this run.</li>
+              <li><b>Official Days:</b> Integer -- Total working days (26, 30, etc.).</li>
+              <li><b>Worked Days:</b> Integer -- Days actually worked.</li>
+              <li><b>Present Days:</b> Integer -- Days present.</li>
+              <li><b>LOP Days:</b> Integer -- Loss of Pay days.</li>
+            </ul>
+          </article>
+
+          <article class="card">
+            <h3>Salary Components</h3>
+            <ul>
+              <li><b>Basic:</b> Integer -- Base salary from CTC.</li>
+              <li><b>Basic Stat:</b> Integer -- Statutory basic for PF/ESI.</li>
+              <li><b>HRA:</b> Integer -- House Rent Allowance.</li>
+              <li><b>Bonus:</b> Integer -- Rule-based bonus.</li>
+              <li><b>Special Allowance:</b> Integer -- Balancing component.</li>
+            </ul>
+          </article>
+
+          <article class="card">
+            <h3>Employer Contributions</h3>
+            <ul>
+              <li><b>Employer PF:</b> Integer -- Employer PF contribution.</li>
+              <li><b>Employer ESI:</b> Integer -- Employer ESI contribution.</li>
+              <li><b>Gratuity:</b> Integer -- Employer gratuity contribution.</li>
+            </ul>
+          </article>
+
+          <article class="card">
+            <h3>Deductions</h3>
+            <ul>
+              <li><b>Employee PF:</b> Integer -- PF deduction.</li>
+              <li><b>Employee ESI:</b> Integer -- ESI deduction.</li>
+              <li><b>Medical Insurance:</b> Integer -- Fixed deduction.</li>
+              <li><b>TDS:</b> Integer -- Monthly income tax.</li>
+            </ul>
+          </article>
+
+          <article class="card">
+            <h3>Tax Details</h3>
+            <ul>
+              <li><b>Tax Slab Base:</b> Integer -- Base amount for tax.</li>
+              <li><b>Tax Multiplier:</b> Decimal -- Applied tax rate.</li>
+              <li><b>Tax After Rebate:</b> Integer -- Post-rebate tax.</li>
+              <li><b>Tax With Cess:</b> Integer -- Final tax including cess.</li>
+            </ul>
+          </article>
+
+          <article class="card">
+            <h3>Final Salary Values</h3>
+            <ul>
+              <li><b>Gross Payable (WITHOUT CCA):</b> Integer -- Salary before deductions.</li>
+              <li><b>Annual Gross:</b> Integer -- Yearly equivalent.</li>
+              <li><b>Take Home Salary (WITHOUT CCA):</b> Integer -- Final amount after deductions.</li>
+            </ul>
+          </article>
+
+          <article class="card">
+            <h3>System Fields</h3>
+            <ul>
+              <li><b>Payroll Status:</b> PROCESSED/PENDING/FAILED -- Processing outcome.</li>
+              <li><b>Created At:</b> Timestamp -- Record creation time.</li>
+              <li><b>Updated At:</b> Timestamp -- Last update time.</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+    </div>
+  </div>
+</body>
+</html>

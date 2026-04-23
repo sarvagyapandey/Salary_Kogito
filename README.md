@@ -36,6 +36,29 @@ cd salary-kogito
 - GraphQL API: `http://localhost:8080/graphql`
 - Dev UI: `http://localhost:8080/q/dev/`
 
+The backend now reads employee input data from MongoDB instead of `employees.json`.
+By default it connects to:
+
+```bash
+mongodb://localhost:27018/payrollDB
+```
+
+You can override that with:
+
+```bash
+export MONGODB_URI=mongodb://localhost:27018/payrollDB
+export MONGODB_DATABASE=payrollDB
+```
+
+For salary calculation lookups, keep the same `employeeId` in both:
+- `employeeMaster.basicDetails.employeeId`
+- `payroll.employeeId`
+
+The backend merges these fields for calculation input:
+- `name` from `employeeMaster.basicDetails.name`
+- `ctc` from `payroll.inputSnapshot.ctc` or fallback `employeeMaster.statutoryBank.ctc`
+- `cca`, `category`, `location`, `pfOption`, `professionalTax`, `employeePFOverride` from `payroll.inputSnapshot`
+
 ### Frontend (React + Vite)
 
 ```bash
@@ -49,6 +72,29 @@ npm run dev
 ### Both Together
 
 Open two terminals and run both commands above. Then visit `http://localhost:5173`
+
+### Optional MongoDB For `setup.mongo.js`
+
+If you want to run the root-level `setup.mongo.js` script, start MongoDB first:
+
+```bash
+docker compose up -d
+```
+
+Then execute the setup script with `mongosh`:
+
+```bash
+mongosh "mongodb://localhost:27018/payrollDB" setup.mongo.js
+```
+
+Useful commands:
+
+```bash
+docker compose ps
+docker compose down
+```
+
+This MongoDB container is only needed for the standalone schema/seed script. It is not required by the frontend or Quarkus quick start documented above.
 
 ---
 

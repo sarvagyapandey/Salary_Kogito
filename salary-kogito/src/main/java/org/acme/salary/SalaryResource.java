@@ -18,7 +18,46 @@ public class SalaryResource {
     EmployeeRepository employeeRepository;
 
     /**
-     * GraphQL Query example (single employee, no DB lookup):
+     * Fetch employee details from MongoDB by employee ID
+     * Returns: { employeeId, name, ctc, cca, category, location, pfOption, professionalTax, employeePFOverride }
+     */
+    @Query
+    public EmployeeData getEmployee(String employeeId) {
+        if (employeeId == null || employeeId.isBlank()) {
+            throw new RuntimeException("employeeId is required");
+        }
+
+        Map<String, Object> employee = employeeRepository.findById(employeeId);
+        if (employee == null) {
+            throw new RuntimeException("Employee not found: " + employeeId);
+        }
+
+        return new EmployeeData(employee);
+    }
+
+    /**
+     * Calculate salary using employee data from MongoDB
+     * Now only requires: employeeId (fetches other params from DB)
+     * 
+     * GraphQL Query example:
+     * calculateSalaryFromDatabase(employeeId: "emp_16")
+     */
+    @Query
+    public SalaryResponse calculateSalaryFromDatabase(String employeeId) {
+        if (employeeId == null || employeeId.isBlank()) {
+            throw new RuntimeException("employeeId is required");
+        }
+
+        Map<String, Object> employee = employeeRepository.findById(employeeId);
+        if (employee == null) {
+            throw new RuntimeException("Employee not found: " + employeeId);
+        }
+
+        return salaryService.calculate(employee);
+    }
+
+    /**
+     * GraphQL Query example (legacy - single employee, no DB lookup):
      * calculateSalary(
      *   employeeId: "emp_16",
      *   name: "Bruce",
@@ -47,11 +86,11 @@ public class SalaryResource {
             throw new RuntimeException("employeeId must be provided");
         }
 
-        // Two modes: (a) full payload provided, (b) only employeeId provided → lookup JSON fixture
+        // Two modes: (a) full payload provided, (b) only employeeId provided -> lookup MongoDB data
         Map<String, Object> employee = new HashMap<>();
         Map<String, Object> stored = employeeRepository.findById(employeeId);
 
-        // If caller omitted CTC, pull everything from repository record
+        // If caller omitted CTC, pull everything from the stored MongoDB record
         if ((ctc == null || ctc <= 0) && stored != null) {
             employee.putAll(stored);
         } else {

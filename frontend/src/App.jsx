@@ -11,63 +11,101 @@ const statusLabels = {
 
 export default function App() {
   const [employeeId, setEmployeeId] = useState('emp_16');
-  const [employeeName, setEmployeeName] = useState('');
-  const [ctc, setCtc] = useState('600000');
-  const [cca, setCca] = useState('10000');
-  const [pfOption, setPfOption] = useState('');
-  const [professionalTax, setProfessionalTax] = useState('200');
-  const [employeePFOverride, setEmployeePFOverride] = useState('');
+  const [employeeData, setEmployeeData] = useState(null);
   const [calcResult, setCalcResult] = useState(null);
   const [status, setStatus] = useState("loading");
   const [message, setMessage] = useState("Checking the current setup...");
-  const [busy, setBusy] = useState({ rules: false, employees: false });
+  const [busy, setBusy] = useState({ rules: false, employees: false, loading: false });
 
-  const handleCalc = async () => {
+  // Load employee data from database
+  const handleLoadEmployee = async () => {
+    if (!employeeId || employeeId.trim() === '') {
+      setStatus('error');
+      setMessage('Please enter an Employee ID');
+      return;
+    }
+
+    setBusy(current => ({ ...current, loading: true }));
     setStatus('loading');
-    setMessage('Calculating...');
+    setMessage('Loading employee data...');
+    
     try {
       const data = await gql(`
-        query(
-          $id:String!
-          $name:String
-          $ctc:Float!
-          $cca:Float
-          $category:String
-          $location:String
-          $pfOption:Float
-          $professionalTax:Float
-          $employeePFOverride:Float
-        ){
-          calculateSalary(
-            employeeId:$id
-            name:$name
-            ctc:$ctc
-            cca:$cca
-            category:$category
-            location:$location
-            pfOption:$pfOption
-            professionalTax:$professionalTax
-            employeePFOverride:$employeePFOverride
-          ){
-            employeeId name ctc cca location category professionalTax pfOption basic hra specialAllowance bonus grossPayable
-            employeePF employerPF employeeESI employerESI
-            gratuity medicalInsurance tds takeHomeSalary
+        query($id:String!) {
+          getEmployee(employeeId:$id) {
+            employeeId
+            name
+            ctc
+            cca
+            location
+            category
+            pfOption
+            professionalTax
+            employeePFOverride
+          }
+        }
+      `, { id: employeeId });
+
+      if (data.getEmployee) {
+        setEmployeeData(data.getEmployee);
+        setStatus('healthy');
+        setMessage(`✓ Employee "${data.getEmployee.name}" loaded successfully`);
+      } else {
+        setStatus('error');
+        setMessage('Employee not found');
+        setEmployeeData(null);
+      }
+    } catch (err) {
+      setStatus('error');
+      setMessage(`Error: ${err.message}`);
+      setEmployeeData(null);
+    } finally {
+      setBusy(current => ({ ...current, loading: false }));
+    }
+  };
+
+  // Calculate salary using loaded employee data
+  const handleCalc = async () => {
+    if (!employeeData) {
+      setStatus('error');
+      setMessage('Please load an employee first');
+      return;
+    }
+
+    setStatus('loading');
+    setMessage('Calculating salary...');
+    
+    try {
+      const data = await gql(`
+        query($id:String!) {
+          calculateSalaryFromDatabase(employeeId:$id) {
+            employeeId
+            name
+            ctc
+            cca
+            location
+            category
+            professionalTax
+            pfOption
+            basic
+            hra
+            specialAllowance
+            bonus
+            grossPayable
+            employeePF
+            employerPF
+            employeeESI
+            employerESI
+            gratuity
+            medicalInsurance
+            tds
+            takeHomeSalary
             errors
           }
-        }`, { 
-          id: employeeId,
-          name: employeeName || null,
-          ctc: parseFloat(ctc) || 0,
-          cca: parseFloat(cca) || 0,
-          category: null,
-          location: null,
-          pfOption: pfOption === '' ? null : parseFloat(pfOption),
-          professionalTax: professionalTax === '' ? 0 : parseFloat(professionalTax),
-          employeePFOverride: employeePFOverride === '' ? null : parseFloat(employeePFOverride)
-        });
-      
-      // Calculate both versions of takeHomeSalary and grossPayable
-      const result = data.calculateSalary;
+        }
+      `, { id: employeeId });
+
+      const result = data.calculateSalaryFromDatabase;
       const takeHomeSalaryWithCCA = (result.takeHomeSalary || 0) + (result.cca || 0);
       const takeHomeSalaryWithoutCCA = result.takeHomeSalary;
       const grossPayableWithCCA = (result.grossPayable || 0) + (result.cca || 0);
@@ -80,16 +118,17 @@ export default function App() {
         grossPayableWithCCA,
         grossPayableWithoutCCA
       });
+
       if (result.errors && result.errors.length) {
         setStatus('error');
         setMessage(result.errors.join('; '));
       } else {
         setStatus('healthy');
-        setMessage('Calculation completed successfully');
+        setMessage('✓ Salary calculation completed successfully');
       }
-    } catch (e) { 
+    } catch (err) {
       setStatus('error');
-      setMessage(e.message); 
+      setMessage(`Error: ${err.message}`);
     }
   };
 
@@ -352,92 +391,97 @@ export default function App() {
         <section className="card summary-card">
           <div className="summary-head">
             <div>
-              <p className="eyebrow">Employee Details</p>
-              <h2>Single Employee Calculation</h2>
+              <p className="eyebrow">Employee Salary Calculation</p>
+              <h2>Calculate from Database</h2>
             </div>
           </div>
           
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '12px', marginTop: '18px', alignItems: 'flex-end' }}>
-            <div>
-              <label style={{ color: 'var(--muted)', fontSize: '0.85rem', display: 'block', marginBottom: '6px' }}>Employee ID</label>
-              <input 
-                type="text" 
-                placeholder="emp_16"
-                value={employeeId}
-                onChange={(e) => setEmployeeId(e.target.value)}
-                style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px dashed rgba(38, 70, 83, 0.22)', background: 'var(--paper-strong)', fontSize: 'inherit' }}
-              />
-            </div>
-            <div>
-              <label style={{ color: 'var(--muted)', fontSize: '0.85rem', display: 'block', marginBottom: '6px' }}>Employee Name</label>
-              <input 
-                type="text" 
-                placeholder="e.g., John Doe"
-                value={employeeName}
-                onChange={(e) => setEmployeeName(e.target.value)}
-                style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px dashed rgba(38, 70, 83, 0.22)', background: 'var(--paper-strong)', fontSize: 'inherit' }}
-              />
-            </div>
-            <div>
-              <label style={{ color: 'var(--muted)', fontSize: '0.85rem', display: 'block', marginBottom: '6px' }}>CTC</label>
-              <input 
-                type="number" 
-                placeholder="600000"
-                value={ctc}
-                onChange={(e) => setCtc(e.target.value)}
-                style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px dashed rgba(38, 70, 83, 0.22)', background: 'var(--paper-strong)', fontSize: 'inherit' }}
-              />
-            </div>
-            <div>
-              <label style={{ color: 'var(--muted)', fontSize: '0.85rem', display: 'block', marginBottom: '6px' }}>CCA</label>
-              <input 
-                type="number" 
-                placeholder="10000"
-                value={cca}
-                onChange={(e) => setCca(e.target.value)}
-                style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px dashed rgba(38, 70, 83, 0.22)', background: 'var(--paper-strong)', fontSize: 'inherit' }}
-              />
-            </div>
-            <div>
-              <label style={{ color: 'var(--muted)', fontSize: '0.85rem', display: 'block', marginBottom: '6px' }}>PF Option (1-5)</label>
-              <input 
-                type="number" 
-                placeholder="e.g., 4"
-                value={pfOption}
-                onChange={(e) => setPfOption(e.target.value)}
-                style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px dashed rgba(38, 70, 83, 0.22)', background: 'var(--paper-strong)', fontSize: 'inherit' }}
-              />
-            </div>
-            <div>
-              <label style={{ color: 'var(--muted)', fontSize: '0.85rem', display: 'block', marginBottom: '6px' }}>Professional Tax</label>
-              <input 
-                type="number" 
-                placeholder="e.g., 200"
-                value={professionalTax}
-                onChange={(e) => setProfessionalTax(e.target.value)}
-                style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px dashed rgba(38, 70, 83, 0.22)', background: 'var(--paper-strong)', fontSize: 'inherit' }}
-              />
-            </div>
-            <div>
-              <label style={{ color: 'var(--muted)', fontSize: '0.85rem', display: 'block', marginBottom: '6px' }}>Employee PF Override</label>
-              <input 
-                type="number" 
-                placeholder="optional(for Pf Option 5)"
-                value={employeePFOverride}
-                onChange={(e) => setEmployeePFOverride(e.target.value)}
-                style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px dashed rgba(38, 70, 83, 0.22)', background: 'var(--paper-strong)', fontSize: 'inherit' }}
-              />
+          {/* Step 1: Load Employee */}
+          <div style={{ marginBottom: '24px' }}>
+            <h3 style={{ margin: '0 0 12px 0', color: 'var(--ink)', fontSize: '0.95rem', fontWeight: 600 }}>Step 1: Load Employee from Database</h3>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '12px', alignItems: 'flex-end' }}>
+              <div>
+                <label style={{ color: 'var(--muted)', fontSize: '0.85rem', display: 'block', marginBottom: '6px' }}>Employee ID</label>
+                <input 
+                  type="text" 
+                  placeholder="e.g., emp_16"
+                  value={employeeId}
+                  onChange={(e) => setEmployeeId(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && handleLoadEmployee()}
+                  style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px dashed rgba(38, 70, 83, 0.22)', background: 'var(--paper-strong)', fontSize: 'inherit' }}
+                />
+              </div>
+              <button 
+                className="primary-button" 
+                onClick={handleLoadEmployee}
+                disabled={busy.loading}
+                style={{ minWidth: '160px' }}
+              >
+                {busy.loading ? 'Loading...' : 'Load Employee'}
+              </button>
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: '12px', marginTop: '12px' }}>
-            <button className="primary-button" onClick={handleCalc} style={{ minWidth: '140px' }}>
-              Calculate
-            </button>
-          </div>
+          {/* Step 2: Display Loaded Employee Data */}
+          {employeeData && (
+            <div style={{ marginBottom: '24px', padding: '16px', borderRadius: '14px', background: '#f0f9ff', border: '1px solid #0284c7' }}>
+              <h3 style={{ margin: '0 0 12px 0', color: 'var(--ink)', fontSize: '0.95rem', fontWeight: 600 }}>Step 2: Employee Details (from Database)</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '12px' }}>
+                <div>
+                  <label style={{ color: 'var(--muted)', fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Employee ID</label>
+                  <div style={{ padding: '8px 12px', borderRadius: '8px', background: '#fff', border: '1px solid rgba(38, 70, 83, 0.12)', fontSize: '0.95rem', fontWeight: 500 }}>{employeeData.employeeId}</div>
+                </div>
+                <div>
+                  <label style={{ color: 'var(--muted)', fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Name</label>
+                  <div style={{ padding: '8px 12px', borderRadius: '8px', background: '#fff', border: '1px solid rgba(38, 70, 83, 0.12)', fontSize: '0.95rem', fontWeight: 500 }}>{employeeData.name}</div>
+                </div>
+                <div>
+                  <label style={{ color: 'var(--muted)', fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>CTC</label>
+                  <div style={{ padding: '8px 12px', borderRadius: '8px', background: '#fff', border: '1px solid rgba(38, 70, 83, 0.12)', fontSize: '0.95rem', fontWeight: 500 }}>₹{(employeeData.ctc || 0).toLocaleString('en-IN')}</div>
+                </div>
+                <div>
+                  <label style={{ color: 'var(--muted)', fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>CCA</label>
+                  <div style={{ padding: '8px 12px', borderRadius: '8px', background: '#fff', border: '1px solid rgba(38, 70, 83, 0.12)', fontSize: '0.95rem', fontWeight: 500 }}>₹{(employeeData.cca || 0).toLocaleString('en-IN')}</div>
+                </div>
+                <div>
+                  <label style={{ color: 'var(--muted)', fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Location</label>
+                  <div style={{ padding: '8px 12px', borderRadius: '8px', background: '#fff', border: '1px solid rgba(38, 70, 83, 0.12)', fontSize: '0.95rem', fontWeight: 500 }}>{employeeData.location || '-'}</div>
+                </div>
+                <div>
+                  <label style={{ color: 'var(--muted)', fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>PF Option</label>
+                  <div style={{ padding: '8px 12px', borderRadius: '8px', background: '#fff', border: '1px solid rgba(38, 70, 83, 0.12)', fontSize: '0.95rem', fontWeight: 500 }}>{employeeData.pfOption || '-'}</div>
+                </div>
+                <div>
+                  <label style={{ color: 'var(--muted)', fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Professional Tax</label>
+                  <div style={{ padding: '8px 12px', borderRadius: '8px', background: '#fff', border: '1px solid rgba(38, 70, 83, 0.12)', fontSize: '0.95rem', fontWeight: 500 }}>₹{(employeeData.professionalTax || 0).toLocaleString('en-IN')}</div>
+                </div>
+                <div>
+                  <label style={{ color: 'var(--muted)', fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Category</label>
+                  <div style={{ padding: '8px 12px', borderRadius: '8px', background: '#fff', border: '1px solid rgba(38, 70, 83, 0.12)', fontSize: '0.95rem', fontWeight: 500 }}>{employeeData.category || '-'}</div>
+                </div>
+              </div>
+            </div>
+          )}
 
+          {/* Step 3: Calculate */}
+          {employeeData && (
+            <div style={{ marginBottom: '24px' }}>
+              <h3 style={{ margin: '0 0 12px 0', color: 'var(--ink)', fontSize: '0.95rem', fontWeight: 600 }}>Step 3: Calculate Salary</h3>
+              <button className="primary-button warm" onClick={handleCalc} style={{ minWidth: '160px' }}>
+                Calculate Salary
+              </button>
+            </div>
+          )}
+
+          {!employeeData && (
+            <div style={{ padding: '16px', borderRadius: '12px', background: '#fef3c7', border: '1px solid #fcd34d', color: '#92400e', fontSize: '0.9rem' }}>
+              <strong>👉 Load an employee first to see their details and calculate salary</strong>
+            </div>
+          )}
+
+          {/* Results */}
           {calcResult && (
-            <div style={{ marginTop: '18px', padding: '18px', borderRadius: '18px', background: '#fff', border: '1px solid rgba(38, 70, 83, 0.08)' }}>
+            <div style={{ marginTop: '24px', padding: '18px', borderRadius: '18px', background: '#fff', border: '1px solid rgba(38, 70, 83, 0.08)' }}>
               {calcResult.errors && calcResult.errors.length > 0 && (
                 <div style={{ marginBottom: '12px', padding: '12px', borderRadius: '12px', background: '#fff4f0', border: '1px solid #f5c2a7', color: '#b54708' }}>
                   <strong>Validation issues:</strong>

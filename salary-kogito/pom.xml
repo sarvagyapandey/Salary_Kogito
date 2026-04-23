@@ -87,6 +87,12 @@
       <artifactId>quarkus-smallrye-graphql</artifactId>
     </dependency>
 
+    <!-- MongoDB -->
+    <dependency>
+      <groupId>io.quarkus</groupId>
+      <artifactId>quarkus-mongodb-client</artifactId>
+    </dependency>
+
     <!-- Drools Dynamic Wiring (for field access and pattern matching) -->
     <dependency>
       <groupId>org.drools</groupId>
